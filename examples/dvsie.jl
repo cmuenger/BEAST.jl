@@ -9,7 +9,7 @@ using StaticArrays
 
 ntrc = X->ntrace(X,Γ)
 
-T = tetmeshsphere(1.0,0.3)
+T = tetmeshsphere(1.0,0.25)
 X = nedelecd3d(T)
 Γ = boundary(T)
 Y = raviartthomas(Γ)
@@ -20,31 +20,56 @@ Y = raviartthomas(Γ)
 Z = BEAST.buffachristiansen2(Γ)
 
 
-κ,  η  = 1.0, 1.0
-κ′, η′ = √2κ, η/√2
-ϵ_r =3
-ϵ_b =2.0
-κ_in, η_in = √6κ, η/√6
 
+module Material
 
-#χ = x->(1.0-1.0/ϵ_r)
+    const ϵ_0 = 1.0
+    const ϵ_b = 1.5
+    const ϵ_r = 2.0
+    
+    const μ_0 = 1.0
+    const μ_b = 3.0
+    const μ_r = 2.0
 
-function tau(x::SVector{U,T}) where {U,T}
-    1.0-1.0/3.0
+    wavenumber_freespace(ω) = ω*√(ϵ_0*μ_0)
+    impedance_freespace() = √(μ_0/ϵ_0)
+    
+    wavenumber_background(ω) = ω*√(ϵ_0*ϵ_b*μ_0*μ_b)
+    impedance_background() = √(μ_0*μ_b/(ϵ_0*ϵ_b))
+
+    wavenumber_inside(ω) = ω*√(ϵ_0*ϵ_b*ϵ_r*μ_0*μ_b*μ_r)
+    impedance_inside() = √(μ_0*μ_b*μ_r/(ϵ_0*ϵ_b*ϵ_r))
 end
 
-χ = tau
+ω = 0.3
+#wavenumbers and impedance
+κ,  η  = Material.wavenumber_freespace(ω),Material.impedance_freespace()
+κ′, η′ = Material.wavenumber_background(ω),Material.impedance_background()
+κ_in, η_in = Material.wavenumber_inside(ω),Material.impedance_inside()
 
+#contrast currents
+χ_E = x->(1.0-1.0/Material.ϵ_r)
+χ_H = x->(1.0-1.0/Material.μ_r)
+
+#=
+function tau(x::SVector{U,T}) where {U,T}
+    1.0-1.0/Material.ϵ_r
+end
+χ = tau
+=#
 
 
 N = NCross()
 #Volume-Volume
-L,I,B = VIE.singlelayer(wavenumber=κ′, tau=χ), Identity(), VIE.boundary(wavenumber=κ′, tau=χ)
+I = Identity()
+Le,Be,Ke = VIE.singlelayer(wavenumber=κ′, tau=χ_E),  VIE.boundary(wavenumber=κ′, tau=χ_E), VIE.doublelayer(wavenumber=κ′, tau=χ_E)
+Lh,Bh,Kh = VIE.singlelayer(wavenumber=κ′, tau=χ_H),  VIE.boundary(wavenumber=κ′, tau=χ_H), VIE.doublelayer(wavenumber=κ′, tau=χ_H)
+
 #Volume-Surface 
 Lt,Bt,Kt = transpose(VSIE.singlelayer(wavenumber=κ′)), transpose(VSIE.boundary(wavenumber=κ′)), transpose(VSIE.doublelayer(wavenumber=κ′))
-#Kt = VSIE.doublelayerT(wavenumber=κ′)
 
-Ls,Bs,Ks = VSIE.singlelayer(wavenumber=κ′, tau=χ), VSIE.boundary(wavenumber=κ′, tau=χ), VSIE.doublelayer(wavenumber=κ′, tau=χ)
+Lse,Bse,Kse = VSIE.singlelayer(wavenumber=κ′, tau=χ_E), VSIE.boundary(wavenumber=κ′, tau=χ_E), VSIE.doublelayer(wavenumber=κ′, tau=χ_E)
+Lsh,Bsh,Ksh = VSIE.singlelayer(wavenumber=κ′, tau=χ_H), VSIE.boundary(wavenumber=κ′, tau=χ_H), VSIE.doublelayer(wavenumber=κ′, tau=χ_H)
 #Surface-Surface
 T  = Maxwell3D.singlelayer(wavenumber=κ)  #Outside
 T′ = Maxwell3D.singlelayer(wavenumber=κ′) #Inside
@@ -56,30 +81,49 @@ H = -1/(im*κ*η)*curl(E)
 
 e, h = (n × E) × n, (n × H) × n
 
-@hilbertspace D j m
-@hilbertspace k l o
+@hilbertspace D B j m
+@hilbertspace k l o p
+#=
 β = 1/(ϵ_r*ϵ_b)
 ν = 1/ϵ_b
+θ = 1/(μ_b*μ_r)
+
+ρ = 1/μ_b
 α, α′ = 1/η, 1/η′
 γ′ = im*η′/κ′
+λ′ = im/(η′*κ′)
 ζ′ = im*κ′/(ϵ_b*η′)
 δ′ = im*κ′/ϵ_b
 
-#=
-eq = @varform (β*I[k,D] + η′*Lt[k,j]-γ′*Bt[ntrc(k),j] -          Kt[k,m] +
-                                     (η*T+η′*T′)[l,j] -      (K+K′)[l,m] +
-                                          (K+K′)[o,j] + (α*T+α′*T′)[o,m] == -e[l] - h[o])
+#= D-VSIE (D-VIE combined with PMCHWT) =#
 
+eq = @varform (β*I[k,D]-ν*Le[k,D]-ν*Be[ntrc(k),D] + η′*Lt[k,j]-γ′*Bt[ntrc(k),j] -          Kt[k,m] +
+                    -δ′*Lse[l,D]-ν*Bse[l,ntrc(D)]            + (η*T+η′*T′)[l,j] -      (K+K′)[l,m] +
+                                    -ζ′*Kse[o,D] +                 (K+K′)[o,j] + (α*T+α′*T′)[o,m] == 
+                                    -e[l] - h[o])
 =#
 
-eq = @varform (β*I[k,D]-ν*L[k,D]-ν*B[ntrc(k),D] + η′*Lt[k,j]-γ′*Bt[ntrc(k),j] -          Kt[k,m] +
-                    -δ′*Ls[l,D]-ν*Bs[l,ntrc(D)]            + (η*T+η′*T′)[l,j] -      (K+K′)[l,m] +
-                                    -ζ′*Ks[o,D] +                 (K+K′)[o,j] + (α*T+α′*T′)[o,m] == -e[l] - h[o])
+β = 1/(Material.ϵ_r*Material.ϵ_b)
+δ = 1/Material.ϵ_b
+σ = 1/(Material.μ_b*Material.μ_r)
+ν = 1/Material.μ_b
+
+γ′ = im*κ′
+
+α, α′ = 1/η, 1/η′
 
 
-dvsie = @discretise eq  D∈X k∈X j∈Y m∈Y l∈Y o∈Y
+#= DB-VSIE (DB-VIE combined with PMCHWT) =#  
+eq = @varform (β*I[k,D]-δ*Le[k,D]-δ*Be[ntrc(k),D]  +     γ′*η′*ν*Kh[k,B]                  +       η′*Lt[k,j]+ η′/γ′*Bt[ntrc(k),j] +         -Kt[k,m]                     +
+                 -γ′*δ*α′*Ke[l,D]                  +  σ*I[l,B]-ν*Lh[l,B]-ν*Bh[ntrc(l),B]  +          Kt[l,j]                      +       α′*Lt[l,m]+α′/γ′*Bt[ntrc(l),m] +
+                   -γ′*δ*Lse[o,D]-δ*Bse[o,ntrc(D)] +    γ′*ν*η′*Ksh[o,B]                  + (η*T+η′*T′)[o,j]                      +     -(K+K′)[o,m]                     +
+                -γ′*δ*α′*Kse[p,D]                  +      -γ′*ν*Lsh[p,B]-ν*Bsh[p,ntrc(B)] +      (K+K′)[p,j]                      + (α*T+α′*T′)[p,m]                     == 
+                                      -e[o] -h[p])
 
-u_n  = solve(dvsie)
+
+dbvsie = @discretise eq  D∈X B∈X j∈Y m∈Y k∈X l∈X o∈Y p∈Y
+
+u_n  = solve(dbvsie)
 
 
 #=
@@ -124,6 +168,7 @@ x, ch = IterativeSolvers.gmres!(x, precond*A_dvsie, precond*Rhs, log=true,  relt
 =#
 
 #Post processing
+#=
 Θ, Φ = range(0.0,stop=2π,length=100), 0.0
 ffpoints = [point(cos(ϕ)*sin(θ), sin(ϕ)*sin(θ), cos(θ)) for θ in Θ for ϕ in Φ]
 
@@ -140,13 +185,15 @@ using Plots
 plot(xlabel="theta")
 plot!(Θ,norm.(ff),label="far field",title="DVSIE")
 plot!(Θ,√6.0*norm.(ff),label="far field",title="DVSIE 2")
+=#
 
+using Plots
 import Plotly
 using LinearAlgebra
 fcrj, _ = facecurrents(u_n[j],Y)
 fcrm, _ = facecurrents(u_n[m],Y)
-vsie_j = Plotly.plot([patch(Γ, norm.(fcrj))], Plotly.Layout(title="j D-VSIE"))
-vsie_m = Plotly.plot(patch(Γ, norm.(fcrm)), Plotly.Layout(title="m D-VSIE"))
+vsie_j = Plotly.plot([patch(Γ, norm.(fcrj))], Plotly.Layout(title="j DB-VSIE"))
+vsie_m = Plotly.plot(patch(Γ, norm.(fcrm)), Plotly.Layout(title="m DB-VSIE"))
 
 #NearField
 function nearfield(um,uj,Xm,Xj,κ,η,points,
@@ -167,8 +214,8 @@ function nearfield(um,uj,Xm,Xj,κ,η,points,
     return E, H
 end
 
-Zz = range(-1,1,length=100)
-Yy = range(-1,1,length=100)
+Zz = range(-4.0,4.0,length=100)
+Yy = range(-4.0,4.0,length=100)
 nfpoints = [point(0.0,y,z) for  z in Zz, y in Yy]
 
 
@@ -184,15 +231,28 @@ E_in, H_in = fetch(task2)
 Enear = BEAST.grideval(nfpoints,β.* u_n[D],X)
 Enear = reshape(Enear,100,100)
 
+Hnear = BEAST.grideval(nfpoints,σ.* u_n[B],X)
+Hnear = reshape(Hnear,100,100)
+
 contour(real.(getindex.(Enear,1)))
 heatmap(Zz, Yy,  real.(getindex.(Enear,1)))
+
+contour(real.(getindex.(Hnear,2)))
+heatmap(Zz, Yy,  real.(getindex.(Hnear,2)))
 
 heatmap(Zz, Yy, real.(getindex.(E_in,1)))
 heatmap(Zz, Yy, real.(getindex.(E_ex,1)))
 
 contour(real.(getindex.(E_ex,1)))
 
+contour(real.(getindex.(E_in,1)))
+
+contour(real.(getindex.(H_ex,2)))
+
+contour(real.(getindex.(H_in,2)))
+
 
 Dd = range(1,100,step=1)
 plot!(Yy,real.(getindex.(E_in[Dd,50],1)))
-plot(collect(Yy)[2:99],real.(getindex.(Enear[2:99,50],1)))
+plot!(collect(Yy)[2:99],real.(getindex.(E_in[2:99,50],1)),label="DB-VSIE")
+plot!(collect(Yy)[2:99],real.(getindex.(H_in[2:99,50],2)),label="DB-VSIE")

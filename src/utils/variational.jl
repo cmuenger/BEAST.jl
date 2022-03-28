@@ -97,7 +97,7 @@ export hilbertspace, @hilbertspace
 export @varform, Equation
 export LinForm, LinTerm, BilForm, BilTerm
 
-import Base: +, -, *, getindex, ^, print
+import Base: +, -, *, /, getindex, ^, print
 import LinearAlgebra: dot
 
 mutable struct HilbertVector
@@ -291,6 +291,10 @@ function *(α::Number, a::BilForm)
   return b
 end
 
+function /(α::Number, a::BilForm)
+    error("Division by bilinear form is not defined" )
+end
+
 function *(α::Number, a::LinForm)
     b = deepcopy(a)
     for t in b.terms t.coeff *= α end
@@ -367,7 +371,7 @@ E.g:
     PMCH = @varform M[k,j] - η*T[k,m] + 1/η*T[l,j] + M[l,m] = e[k] + h[l]
 """
 macro varform(x)
-    y = transposecalls!(x, [:+, :-, :*, :^, :(==)])
+    y = transposecalls!(x, [:+, :-, :/, :*, :^, :(==)])
     esc(y)
 end
 

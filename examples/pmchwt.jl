@@ -12,8 +12,10 @@ X = raviartthomas(Γ)
 Y = BEAST.buffachristiansen2(Γ)
 
 
-κ,  η  = 1.0, 1.0
-κ′, η′ = √5.0κ, η/√5.0
+ω, ϵ, μ = 0.3, 3.0, 6.0
+
+κ,  η  = ω, 1.0
+κ′, η′ =  ω*√(ϵ*μ), √(μ/ϵ)
 
 N = NCross()
 
@@ -129,9 +131,9 @@ function nearfield(um,uj,Xm,Xj,κ,η,points,
 end
 
 
-Z = range(-1,1,length=100)
-Y = range(-1,1,length=100)
-nfpoints = [point(0,y,z) for z in Z, y in Y]
+Zz = range(-4.0,4.0,length=100)
+Yy = range(-4.0,4.0,length=100)
+nfpoints = [point(0,y,z) for z in Zz, y in Yy]
 
 import Base.Threads: @spawn
 task1 = @spawn nearfield(u[m],u[j],X,X,κ,η,nfpoints,E,H)
@@ -143,15 +145,19 @@ E_in, H_in = fetch(task2)
 E_tot = E_in + E_ex
 H_tot = H_in + H_ex
 
-contour(real.(getindex.(E_tot,1)))
+contour(real.(getindex.(E_in,1)))
 contour(real.(getindex.(H_tot,2)))
 
-heatmap(Z, Y, real.(getindex.(E_tot,1)),title="E_tot PMCHWT")
+heatmap(Zz, Yy, real.(getindex.(E_in,1)),title="E_tot PMCHWT")
+heatmap(Zz, Yy, real.(getindex.(H_in,2)),title="H_tot PMCHWT")
 #heatmap(Z, Y, real.(getindex.(H_tot,2)))
 #heatmap(Z, Y, real.(getindex.(E_in,1)))
 #heatmap(Z, Y, real.(getindex.(E_ex,1)))
-#plot(fontfamily="Times",Y[2:99],real.(getindex.(E_tot[2:99,50],1)),label="PMCHWT",title="x-Component of Electrical Near Field inside Sphere")
+#plot(fontfamily="Times",Yy[2:99],real.(getindex.(E_in[2:99,50],1)),label="PMCHWT",title="x-Component of Electrical Near Field inside Sphere")
+
 #plot!(real.(getindex.(H_tot[:,51],2)))
+
+#plot(fontfamily="Times",Yy[2:99],real.(getindex.(H_in[2:99,50],2)),label="PMCHWT",title="y-Component of Magnetic Near Field inside Sphere")
 
 #=
 # Compare the far field and the field far

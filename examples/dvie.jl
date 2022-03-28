@@ -4,30 +4,45 @@ using Profile
 using TimerOutputs
 using StaticArrays
 
-function tau(x::SVector{U,T}) where {U,T}
-    1.0-1.0/5.0
+function tau_E(x::SVector{U,T}) where {U,T}
+    1.0-1.0/3.0
 end
+
+
+function tau_H(x::SVector{U,T}) where {U,T}
+    1.0-1.0/6.0
+end
+
 
 ntrc = X->ntrace(X,y)
 
-T = tetmeshsphere(1.0,0.2)
+T = tetmeshsphere(1.0,0.25)
 X = nedelecd3d(T)
 y = boundary(T)
 @show numfunctions(X)
 
-ϵ, μ, ω = 1.0, 1.0, 1.0; κ, η = ω * √(ϵ*μ), √(μ/ϵ)
-ϵ_r =5.0
-χ = tau
-K, I, B = VIE.singlelayer(wavenumber=κ, tau=χ), Identity(), VIE.boundary(wavenumber=κ, tau=χ)
+ϵ, μ, ω = 1.0, 1.0, 0.3; κ, η = ω * √(ϵ*μ), √(μ/ϵ)
+ϵ_r, μ_r =3.0, 6.0
+χ_E = tau_E
+χ_H = tau_H
+I = Identity()
+Le, Be, Ke = VIE.singlelayer(wavenumber=κ, tau=χ_E), VIE.boundary(wavenumber=κ, tau=χ_E), VIE.doublelayer(wavenumber=κ, tau=χ_E)
+Lh, Bh, Kh = VIE.singlelayer(wavenumber=κ, tau=χ_H), VIE.boundary(wavenumber=κ, tau=χ_H), VIE.doublelayer(wavenumber=κ, tau=χ_H)
 E = VIE.planewave(direction=ẑ, polarization=x̂, wavenumber=κ)
 H = -1/(im*κ*η)*curl(E)
 
-@hilbertspace j 
-@hilbertspace k
+@hilbertspace D B
+@hilbertspace k l
 α = 1.0/ϵ_r
-eq = @varform α*I[j,k]-K[j,k]-B[ntrc(j),k] == E[j] 
-
-dbvie = @discretise eq j∈X k∈X
+β = 1.0/μ_r
+#=DB-VIE=#
+eq = @varform α*I[k,D]-Le[k,D]-Be[ntrc(k),D] +    im*κ*η*Kh[k,B] +
+               -im*κ/η*Ke[l,D]               +  β*I[l,B]-Lh[l,B]-Bh[ntrc(l),B] == E[k] + H[l]
+#=D-VIE=#
+#eq = @varform α*I[k,D]-Le[k,D]-Be[ntrc(k),D] == E[k] 
+#=B-VIE=#
+#eq = @varform β*I[l,B]-Lh[l,B]-Bh[ntrc(l),B] == H[l] 
+dbvie = @discretise eq  D∈X B∈X k∈X l∈X 
 u_m = solve(dbvie)
 #=
 #postprocessing
@@ -44,19 +59,27 @@ plot!(Θ, norm.(ff), label="far field", title="D-VIE")
 =#
 using Plots
 #NearField
-Z = range(-1,1,length=100)
-Y = range(-1,1,length=100)
-nfpoints = [point(0,y,z) for z in Z, y in Y]
+Zz = range(-4.0,4.0,length=100)
+Yy = range(-4.0,4.0,length=100)
+nfpoints = [point(0,y,z) for z in Zz, y in Yy]
 
-Enear = BEAST.grideval(nfpoints,α.*u_m,X)
+Enear = BEAST.grideval(nfpoints,α.*u_m[D],X)
 Enear = reshape(Enear,100,100)
 
-contour(real.(getindex.(Enear,1)))
-heatmap(Z, Y,  real.(getindex.(Enear,1)))
+Hnear = BEAST.grideval(nfpoints,β.*u_m[B],X)
+Hnear = reshape(Hnear,100,100)
+
+#contour(real.(getindex.(Enear,1)))
+
+heatmap(Zz, Yy,  real.(getindex.(Enear,1)))
+heatmap(Zz, Yy,  real.(getindex.(Hnear,2)))
 
 
-plot!(Y[2:99],real.(getindex.(Enear[2:99,50],1)),label="D-VIE (simplex)", linestyle=:dash, linecolor=:darkorange4)
-#plot!(Y[2:99],real.(getindex.(Enear_simplex[2:99,50],1)),label="D-VIE (simplex)", linestyle=:solid, linecolor=:darkorange3)
+#plot!(Yy[2:99],real.(getindex.(Enear[2:99,50],1)),label="D-VIE (simplex)", linestyle=:dash, linecolor=:darkorange4)
+
+#plot!(Yy[2:99],real.(getindex.(Enear_simplex[2:99,50],1)),label="D-VIE (simplex)", linestyle=:solid, linecolor=:darkorange3)
+
+#plot!(Yy[2:99],real.(getindex.(Hnear[2:99,50],2)),label="D-VIE (simplex)", linestyle=:dash, linecolor=:darkorange4)
 
 #=
 import Cairo

@@ -173,7 +173,6 @@ module VIE
             gamma=nothing,
             wavenumber=nothing,
             alpha=nothing,
-            beta=nothing,
             tau=nothing)
 
         if (gamma == nothing) && (wavenumber == nothing)

@@ -165,8 +165,9 @@ function integrand(viop::VIEBoundary2, kerneldata, tvals, tgeo, bvals, bgeo)
 end
 
 function integrand(viop::VIEDoubleLayer, kerneldata, tvals, tgeo, bvals, bgeo)
-    gx = tvals[1]
-    fy = bvals[1]
+   
+    gx = @SVector[tvals[i].value for i in 1:4]
+    fy = @SVector[bvals[i].value for i in 1:4]
 
     gradG = kerneldata.gradgreen
     
@@ -174,7 +175,7 @@ function integrand(viop::VIEDoubleLayer, kerneldata, tvals, tgeo, bvals, bgeo)
     
     α = viop.α
 
-    t = α * dot(gx, cross(gradG, Ty*fy))
+    @SMatrix[α * dot(gx[i], cross(gradG, Ty*fy[j])) for i in 1:4, j in 1:4]
 end
 
 
