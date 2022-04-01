@@ -205,6 +205,8 @@ include("helmholtz3d/hh3dexc.jl")
 include("helmholtz3d/hh3dops.jl")
 include("helmholtz3d/nitsche.jl")
 include("helmholtz3d/hh3dnear.jl")
+include("helmholtz3d/hh3dfar.jl")
+include("helmholtz3d/hh3d_sauterschwabqr.jl")
 
 #suport for Volume Integral equation
 include("volumeintegral/vie.jl")

@@ -57,9 +57,14 @@ mutable struct DirectProductSpace{T} <: AbstractSpace
     factors::Vector{Space{T}}
 end
 
-# defaultquadstrat(op, tfs::DirectProductSpace, bfs::DirectProductSpace) = defaultquadstrat(op, tfs[1], bfs[1])
-# defaultquadstrat(op, tfs, bfs::DirectProductSpace) = defaultquadstrat(op, tfs, bfs[1])
-# defaultquadstrat(op, tfs::DirectProductSpace, bfs) = defaultquadstrat(op, tfs[1], bfs)
+defaultquadstrat(op, tfs::DirectProductSpace, bfs::DirectProductSpace) = defaultquadstrat(op, tfs.factors[1], bfs.factors[1])
+defaultquadstrat(op, tfs::Space, bfs::DirectProductSpace) = defaultquadstrat(op, tfs, bfs.factors[1])
+defaultquadstrat(op, tfs::DirectProductSpace, bfs::Space) = defaultquadstrat(op, tfs.factors[1], bfs)
+
+# defaultquadstrat(op, tfs::DirectProductSpace, bfs::DirectProductSpace) = defaultquadstrat(op, tfs.factors[1], bfs.factors[1])
+# defaultquadstrat(op, tfs::RefSpace, bfs::DirectProductSpace) = defaultquadstrat(op, tfs, bfs.factors[1])
+# defaultquadstrat(op, tfs::DirectProductSpace, bfs::RefSpace) = defaultquadstrat(op, tfs.factors[1], bfs)
+
 
 export cross, ×
 
@@ -249,4 +254,14 @@ function Base.:*(space::Space, A::SparseMatrixCSC)
         pos[i] /= length(nzrange(A,i))
     end
     return (typeof(space))(space.geo, fns, pos)
+end
+
+
+function addf!(fn::Vector{<:Shape}, x::Vector, space::Space, idcs::Vector{Int})
+    for (m,bf) in enumerate(space.fns)
+        for sh in bf
+            cellid = idcs[sh.cellid]
+            BEAST.add!(fn, cellid, sh.refid, sh.coeff * x[m])
+        end
+    end
 end
