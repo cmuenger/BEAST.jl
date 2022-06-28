@@ -610,16 +610,13 @@ end
 gradient(space::LagrangeBasis{1,0}, geo, fns) = NDLCCBasis(geo, fns)
 curl(space::LagrangeBasis{1,0}, geo, fns) = RTBasis(geo, fns)
 
-<<<<<<< Updated upstream
 gradient(space::LagrangeBasis{1,0,<:CompScienceMeshes.AbstractMesh{<:Any,2}}, geo, fns) =
     LagrangeBasis{0,-1,1}(geo, fns, space.pos)
 
 
 gradient(space::LagrangeBasis{1,0,<:CompScienceMeshes.AbstractMesh{<:Any,3}}, geo, fns) =
     NDBasis(geo, fns, space.pos)
-=======
 curl(space::LagrangeBasis{2,0},geo, fns) = BDMBasis(geo, fns)
->>>>>>> Stashed changes
 
 #
 # Sclar trace for Laggrange element based spaces
