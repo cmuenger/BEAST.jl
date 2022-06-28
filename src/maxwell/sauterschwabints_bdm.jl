@@ -18,18 +18,21 @@ function (igd::MWSL3DIntegrand2)(u,v)
         R = norm(r)
         G = exp(-γ*R)/(4π*R)
 
-        f = igd.test_local_space(x)
+        h = igd.test_local_space(x)
         g = igd.trial_local_space(y)
 
         j = jacobian(x) * jacobian(y)
 
         αjG = α*j*G
-        βjG = β*j*G
+        βjG = β*j*G    
 
-        G = @SVector[αjG*g[i].value for i in 1:6]
-        H = @SVector[βjG*g[i].divergence for i in 1:6]
+        Gx = @SVector[αjG*g[i].value for i in 1:6]
+        Hx = @SVector[βjG*g[i].divergence for i in 1:6]
 
-        @SMatrix[dot(f[i].value,G[j])+f[i].divergence*H[j] for i in 1:6, j in 1:6]
+        Gy = @SVector([h[i].value for i in 1:6])
+        Hy = @SVector[h[i].divergence for i in 1:6]
+
+        @SMatrix[dot(Gy[i],Gx[j])+Hy[i]*Hx[j] for i in 1:6, j in 1:6]
 end
 
 function momintegrals!(op::MWSingleLayer3D,
@@ -52,7 +55,7 @@ function momintegrals!(op::MWSingleLayer3D,
 
     igd = MWSL3DIntegrand2(test_triangular_element, trial_triangular_element,
         op, test_local_space, trial_local_space)
-    G = SauterSchwabQuadrature.Sautersauterschwab_parameterized(igd, strat)
+    G = SauterSchwabQuadrature.sauterschwab_parameterized(igd, strat)
 
     A = levicivita(K) == 1 ? @SVector[1,2] : @SVector[2,1]
     B = levicivita(L) == 1 ? @SVector[1,2] : @SVector[2,1]
@@ -147,7 +150,7 @@ function momintegrals!(op::MWDoubleLayer3D,
 
     igd = MWDL3DIntegrand2(test_triangular_element, trial_triangular_element,
         op, test_local_space, trial_local_space)
-    Q = sauterschwab_parameterized(igd, strat)
+    Q = SauterSchwabQuadrature.sauterschwab_parameterized(igd, strat)
     for j ∈ 1:3
         for i ∈ 1:3
             out[i,j] += Q[K[i],L[j]]
