@@ -2,18 +2,18 @@ using CompScienceMeshes, BEAST
 using LinearAlgebra
 using Profile
 using StaticArrays
-
+using TimerOutputs
 
 
 ttrc = X->ttrace(X,y)
 
-T= tetmeshsphere(1.0,0.2)
+T= tetmeshsphere(1.0,0.15)
 X = nedelecc3d(T)
 y = boundary(T)
 @show numfunctions(X)
 
 ϵ, μ, ω = 1.0, 1.0, 1.0; κ, η = ω * √(ϵ*μ), √(μ/ϵ)
-ϵ_r = 5.0
+ϵ_r =  5.0
 
 function tau(x::SVector{U,T}) where {U,T}
     5.0 -1.0
@@ -54,7 +54,8 @@ Enear2 = BEAST.grideval(nfpoints,u_n,X)
 Enear2 = reshape(Enear2,100,100)
 
 contour(real.(getindex.(Enear2,1)))
-heatmap(Z, Y, real.(getindex.(Enear2,1)))
+Plots.heatmap(Z, Y, real.(getindex.(Enear2,1)), title="E-VIE",
+clim=(-0.2,0.9),aspect_ratio=1, xlim=(-1,1),size=(400,400))
 
-plot!(Y[2:99],real.(getindex.(Enear2[2:99,50],1)),label="E-VIE (simplex)", linestyle=:dash, linecolor=:darkolivegreen4)
+plot!(Y[2:99],real.(getindex.(Enear2[2:99,50],1)),label="E-VIE", linestyle=:solid, linecolor=:darkolivegreen4)
 

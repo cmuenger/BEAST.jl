@@ -3,7 +3,7 @@ using LinearAlgebra
 using LiftedMaps
 using BlockArrays
 
-T = tetmeshsphere(1.0,0.25)
+T = tetmeshsphere(1.0,0.15)
 X = nedelecc3d(T)
 Γ = boundary(T)
 
@@ -12,7 +12,7 @@ X = raviartthomas(Γ)
 Y = BEAST.buffachristiansen2(Γ)
 
 
-κ,  η  = 1.0, 1.0
+κ,  η  = 2.0, 1.0
 κ′, η′ = √5.0κ, η/√5.0
 
 N = NCross()
@@ -146,7 +146,7 @@ H_tot = H_in + H_ex
 contour(real.(getindex.(E_tot,1)))
 contour(real.(getindex.(H_tot,2)))
 
-heatmap(Z, Y, real.(getindex.(E_tot,1)),title="E_tot PMCHWT")
+Plots.heatmap(Z, Y, real.(getindex.(E_tot,1)),title="PMCHWT",aspect_ration=1, xlim=(-1,1),size=(400,400))
 #heatmap(Z, Y, real.(getindex.(H_tot,2)))
 #heatmap(Z, Y, real.(getindex.(E_in,1)))
 #heatmap(Z, Y, real.(getindex.(E_ex,1)))

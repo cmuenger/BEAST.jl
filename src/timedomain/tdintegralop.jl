@@ -256,6 +256,14 @@ struct WiltonInts84Strat{T,V,W}
 end
 
 
+
+struct SauterQR{Q,S}
+    strat::Q
+    binonomials::S
+end
+
+
+
 function momintegrals!(z, op, g, f, T, τ, σ, ι, qr::WiltonInts84Strat)
 
     XW = qr.outer_quad_points

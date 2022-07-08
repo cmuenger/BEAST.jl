@@ -76,6 +76,8 @@ export TDMaxwell3D
 
 defaultquadstrat(::MWSingleLayerTDIO, tfs, bfs) = nothing
 
+defaultquadstrat(::MWSingleLayerTDIO, tfs, bfs) = SauterQStrat(2,3,6,7,5,5,4,3)
+
 function quaddata(op::MWSingleLayerTDIO, testrefs, trialrefs, timerefs,
         testels, trialels, timeels, ::Nothing)
 
@@ -85,6 +87,8 @@ function quaddata(op::MWSingleLayerTDIO, testrefs, trialrefs, timerefs,
     V = eltype(testels[1].vertices)
     ws = WiltonInts84.workspace(V)
     # quadpoints(testrefs, testels, (3,)), bn, ws
+      
+    println("using Wilton Integration")
     quadpoints(testrefs, testels, (3,)), bn, ws
 end
 
@@ -92,6 +96,62 @@ end
 quadrule(op::MWSingleLayerTDIO, testrefs, trialrefs, timerefs,
         p, testel, q, trialel, r, timeel, qd, ::Nothing) = WiltonInts84Strat(qd[1][1,p],qd[2],qd[3])
 
+
+function quaddata(op::MWSingleLayerTDIO,
+                  test_local_space::RefSpace, trial_local_space::RefSpace, time_refs,
+                  test_charts, trial_charts, time_els, qs::SauterQStrat)
+        
+    tqd = quadpoints(test_local_space,  test_charts,  (qs.outer_rule_far,qs.outer_rule_near))
+    bqd = quadpoints(trial_local_space, trial_charts, (qs.inner_rule_far,qs.inner_rule_near))
+    leg = (
+           _legendre(qs.sauter_schwab_common_vert,0,1),
+           _legendre(qs.sauter_schwab_common_edge,0,1),
+           _legendre(qs.sauter_schwab_common_face,0,1),)
+        
+        
+    # High accuracy rules (use them e.g. in LF MFIE scenarios)
+    # tqd = quadpoints(test_local_space, test_charts, (8,8))
+    # bqd = quadpoints(trial_local_space, trial_charts, (8,9))
+    # leg = (_legendre(8,a,b), _legendre(10,a,b), _legendre(5,a,b),)
+    dmax = numfunctions(time_refs)-1
+    bn = binomial.((0:dmax),(0:dmax)')   
+    println("using Sauter Schwab Technique")
+    return (tpoints=tqd, bpoints=bqd, gausslegendre=leg),bn
+end
+
+function quadrule(op::MWSingleLayerTDIO, g::RTRefSpace, f::RTRefSpace, timerefs,  i, τ, j, σ, k, ι, qd,
+    qs::SauterQStrat)
+
+  hits = 0
+  dtol = 1.0e3 * eps(eltype(eltype(τ.vertices)))
+  dmin2 = floatmax(eltype(eltype(τ.vertices)))
+  for t in τ.vertices
+      for s in σ.vertices
+          d2 = LinearAlgebra.norm_sqr(t-s)
+          dmin2 = min(dmin2, d2)
+          hits += (d2 < dtol)
+      end
+  end
+
+  hits == 3 && return SauterQR(SauterSchwabQuadrature.CommonFace(qd[1].gausslegendre[3]),qd[2])
+  hits == 2 && return SauterQR(SauterSchwabQuadrature.CommonEdge(qd[1].gausslegendre[2]),qd[2])
+  hits == 1 && return SauterQR(SauterSchwabQuadrature.CommonVertex(qd[1].gausslegendre[1]),qd[2])
+  hits == 0 && return SauterQR(SauterSchwabQuadrature.PositiveDistance(qd[1].gausslegendre[1]),qd[2])
+
+  error("Should be never be reached")
+
+  h2 = volume(σ)
+  xtol2 = 0.2 * 0.2
+  k2 = abs2(op.gamma)
+  max(dmin2*k2, dmin2/16h2) < xtol2 && return WiltonSERule(
+      qd.tpoints[2,i],
+      DoubleQuadRule(
+          qd.tpoints[2,i],
+          qd.bpoints[2,j],),)
+  return DoubleQuadRule(
+      qd.tpoints[1,i],
+      qd.bpoints[1,j],)
+end
 
 struct TransposedStorage{F}
 	store::F
@@ -273,7 +333,7 @@ function innerintegrals!(zl, op::MWSingleLayerTDIO,
     x = cartesian(p)
     n = cross(σ[1]-σ[3],σ[2]-σ[3])
     n /= norm(n)
-    ξ = x - ((x-σ[1]) ⋅ n) * n
+    ξ = x - ((x-σ[1]) ⋅ n) * n #projection of test point on the plane of trial element
 
     r = ι[1]
     R = ι[2]
@@ -316,7 +376,7 @@ function innerintegrals!(zl, op::MWSingleLayerTDIO,
 				if d >= dh
                     @assert dh == 0
                     q = qhs[k]
-                    Ih = tmRoR(d-dh, ∫G, bn) # \int (cTmax-R)^(d-dh)/R dy
+                    Ih = tmRoR(d-dh, ∫G, bn) # \int (-R)^(d-dh)/R dy
                     #zl[i,j,k] += β * q * Ih / sol^(d-dh)
                     zl[i,j,k] += β * q * Ih / solpowers[d-dh+1]
 				end
@@ -333,6 +393,90 @@ function innerintegrals!(zl, op::MWSingleLayerTDIO,
 
 end
 
+struct MWTDSL3DIntegrand{C,D,O,L,M}
+    test_triangular_element::C
+    trial_triangular_element::C
+    time_element::D
+    op::O
+    test_local_space::L
+    trial_local_space::L
+    time_local_space::M
+end
+
+function (igd::MWTDSL3DIntegrand)(u,v)
+
+        x = neighborhood(igd.test_triangular_element,u)
+        y = neighborhood(igd.trial_triangular_element,v)
+
+        r = cartesian(x) - cartesian(y)
+        R = norm(r)
+
+        T = typeof(R)
+    
+        rmin = igd.time_element[1]
+        rmax = igd.time_element[2]
+
+        if R <= rmin || R >= rmax
+            return @SArray[ 0.0 for i in 1:3, j in 1:3, k in 1:3]
+        end
+
+        iR = 1 / R
+
+        Rc = R*igd.op.speed_of_light
+
+        ds = igd.op.ws_diffs
+        dh = igd.op.hs_diffs
+    
+        qhs = qh(T,dh,Val{4})
+        qws = qh(T,ds,Val{4})
+        
+        fx = igd.test_local_space(x)
+        gy = igd.trial_local_space(y)
+
+        j = jacobian(x) * jacobian(y)
+
+        αG = 1 / 4π
+        α = αG*iR * igd.op.ws_weight*j 
+        β = αG*iR * igd.op.hs_weight*j
+
+        Gws =   @SVector[d>= ds ?  qws[d+1]*(-Rc)^(d-ds) : 0.0 for d in 0:2]
+        Ghs =   @SVector[d>= dh ?  qhs[d+1]*(-Rc)^(d-dh) : 0.0 for d in 0:2]
+       
+        @SArray[ α*fx[i].value'*Gws[k]*gy[j].value + β*fx[i].divergence*Ghs[k]*gy[j].divergence for i in 1:3, j in 1:3, k in 1:3]
+end
+
+function momintegrals!(z, op::MWSingleLayerTDIO, U, V, W, τ, σ, ι, qr::SauterQR)
+
+    I, J, K, L = SauterSchwabQuadrature.reorder(τ.vertices,σ.vertices, qr.strat)
+
+    tgeo  = simplex(
+        τ.vertices[I[1]],
+        τ.vertices[I[2]],
+        τ.vertices[I[3]])
+
+    bgeo = simplex(
+        σ.vertices[J[1]],
+        σ.vertices[J[2]],
+        σ.vertices[J[3]])
+
+
+    r = ι[1]
+    R = ι[2]
+
+    @assert r < R
+
+    @assert degree(W) == 2
+
+
+    igd = MWTDSL3DIntegrand(tgeo, bgeo, ι, op, U, V, W)
+
+    G =  SauterSchwabQuadrature.sauterschwab_parameterized(igd, qr.strat)
+
+    for j ∈ 1:3, i ∈ 1:3
+        z[i,j,:] += G[K[i],L[j],:]
+    end
+
+end
 
 
 function innerintegrals!(z, op::MWDoubleLayerTDIO,
@@ -402,3 +546,5 @@ function innerintegrals!(z, op::MWDoubleLayerTDIO,
     end
 
 end
+
+

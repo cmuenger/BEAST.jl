@@ -10,7 +10,7 @@ end
 
 ntrc = X->ntrace(X,y)
 
-T = tetmeshsphere(1.0,0.2)
+T = tetmeshsphere(1.0,0.15)
 X = nedelecd3d(T)
 y = boundary(T)
 @show numfunctions(X)
@@ -28,7 +28,13 @@ H = -1/(im*κ*η)*curl(E)
 eq = @varform α*I[j,k]-K[j,k]-B[ntrc(j),k] == E[j] 
 
 dbvie = @discretise eq j∈X k∈X
-u_m = solve(dbvie)
+
+In = assemble(I,X,X)
+Kn = assemble(K,X,X)
+Kn -=  α*assemble(I,X,X)
+Kn += assemble(B,ntrc(X),X)
+b = -assemble(E,X)
+u_m = BEAST.GMRESSolver(Kn, maxiter=100, restart=100)*b
 #=
 #postprocessing
 Φ, Θ = [0.0], range(0,stop=2π,length=100)
@@ -52,10 +58,11 @@ Enear = BEAST.grideval(nfpoints,α.*u_m,X)
 Enear = reshape(Enear,100,100)
 
 contour(real.(getindex.(Enear,1)))
-heatmap(Z, Y,  real.(getindex.(Enear,1)))
+Plots.heatmap(Z, Y,  real.(getindex.(Enear,1)), title=" D-VIE ",
+        clim=(-0.2,0.9),aspect_ratio=1, xlim=(-1,1), size=(400,400))
 
 
-plot!(Y[2:99],real.(getindex.(Enear[2:99,50],1)),label="D-VIE (simplex)", linestyle=:dash, linecolor=:darkorange4)
+plot!(Y[2:99],real.(getindex.(Enear[2:99,50],1)),label="D-VIE", linestyle=:solid, linecolor=:darkorange4)
 #plot!(Y[2:99],real.(getindex.(Enear_simplex[2:99,50],1)),label="D-VIE (simplex)", linestyle=:solid, linecolor=:darkorange3)
 
 #=

@@ -28,13 +28,52 @@ import Plots
 Plots.plot(xefie[1,:])
 
 import Plotly
-fcr, geo = facecurrents(xefie[:,60], X)
+fcr, geo = facecurrents(xefie[:,61], X)
 Plotly.plot(patch(geo, norm.(fcr)))
 
 
+using PlotlyJS
+
+n_slices = 150
+
+fcr, geo = facecurrents(xefie[:,1], X)
+initial_slice = patch(geo, norm.(fcr))
 
 
+frames  = Vector{PlotlyFrame}(undef, n_slices)
+for k in 1:n_slices
+    fcr, geo = facecurrents(xefie[:,k], X)
 
+    frames[k] = PlotlyJS.frame(data=[attr(intensity=norm.(fcr),cmin=0.0,cmax=0.35)],
+                                 name="fr$k",
+                                 traces=[0])
+end    
+
+sliders = [attr(steps = [attr(method= "animate",
+                              args= [["fr$k"],                           
+                              attr(mode= "immediate",
+                                   frame= attr(duration=20, redraw= true),
+                                   transition=attr(duration= 0))
+                                 ],
+                              label="$k"
+                             ) for k in 1:n_slices], 
+                active=17,
+                transition= attr(duration= 0 ),
+                x=0, # slider starting position  
+                y=0, 
+                currentvalue=attr(font=attr(size=12), 
+                                  prefix="Timestep: ", 
+                                  visible=true, 
+                                  xanchor= "center"
+                                 ),  
+               len=1.0) #slider length
+           ];
+layout = Layout(title_text="Pulse", title_x=0.5,
+                width=600,
+                height=600,
+                sliders=sliders
+            )
+pl= Plot(initial_slice, layout, frames)
 
 Xefie, Δω, ω0 = fouriertransform(xefie, Δt, 0.0, 2)
 ω = collect(ω0 .+ (0:Nt-1)*Δω)
