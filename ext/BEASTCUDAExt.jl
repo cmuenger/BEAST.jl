@@ -6,7 +6,8 @@ using CUDA.CUSPARSE
 
 using BEAST
 import BEAST: assemble!, Threading, Operator, Space, IntegralOperator
-import BEAST: _integrands, _integrands_gen, RTRefSpace, Integrand, pulledback_integrand
+import BEAST: _integrands, _integrands_gen, Integrand, pulledback_integrand
+import BEAST: LagrangeRefSpace, RTRefSpace
 using BEAST.CompScienceMeshes
 using BEAST.SauterSchwabQuadrature
 using BEAST.StaticArrays
@@ -20,7 +21,7 @@ Adapt.@adapt_structure CommonFace
 
 
 include("gpu_utils.jl")
-# include("gpu_basis.jl")
+include("gpu_basis.jl")
 include("gpu_integrals.jl")
 include("gpu_assemble_integralop_v2.jl")
 

@@ -452,8 +452,9 @@ function assemblechunk_gpu!(operator::IntegralOperator, test_functions::Space, t
     numshapes_trial = numfunctions(trial_space,trial_domain)
 
     #@show eltype(test_el_d)
-    shapefunction_type = @NamedTuple{value::SVector{3,Float64},divergence::Float64}
+    shapefunction_type = shapetype(test_space)
     test_shapes_d = CuArray{SVector{numshapes_test,shapefunction_type}}(undef, length(test_el_d), length(quadrule_d))
+    shapefunction_type = shapetype(trial_space)
     trial_shapes_d = CuArray{SVector{numshapes_trial,shapefunction_type}}(undef, length(trial_el_d), length(quadrule_d))
   
     #meshpoint_type = CompScienceMeshes.MeshPointNM{Float64,eltype(test_el_d),2,3}
@@ -466,9 +467,9 @@ function assemblechunk_gpu!(operator::IntegralOperator, test_functions::Space, t
     #   @show CUDA.@allowscalar test_shapes_d[1,1][3]
     
     launch_gpu_kernel!(gpu_shapefunction_eval!, test_shapes_d, test_el_d, test_space, quadrule_d;
-                       gpu_blocksize=(256,4), problem_size=(length(test_el_d),length(quadrule_d)))
+                       gpu_blocksize=(128,4), problem_size=(length(test_el_d),length(quadrule_d)))
     launch_gpu_kernel!(gpu_shapefunction_eval!, trial_shapes_d, trial_el_d, trial_space, quadrule_d;
-                      gpu_blocksize=(256,4), problem_size=(length(trial_el_d),length(quadrule_d)))
+                      gpu_blocksize=(128,4), problem_size=(length(trial_el_d),length(quadrule_d)))
     
     #@show CUDA.@allowscalar test_shapes_d[1,:]
     #@show CUDA.@allowscalar trial_shapes_d[1,:]
