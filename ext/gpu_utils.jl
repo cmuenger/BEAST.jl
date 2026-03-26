@@ -33,6 +33,10 @@ end
 
 function launch_gpu_kernel!(gpu_kernel, args...;gpu_blocksize=(32,32),problem_size)
     
+    if problem_size == 0
+        println("Problem size is zero, skipping GPU kernel launch.")
+        return 
+    end 
     @assert all(gpu_blocksize .> 0)  "GPU block size must be positive integers."
 
     threadsPerBlock = prod(gpu_blocksize)

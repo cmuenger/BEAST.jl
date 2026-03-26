@@ -107,6 +107,7 @@ function assemble(operator::AbstractOperator, test_functions, trial_functions;
     (threading == :cellcoloring) && (threading = Threading{:cellcoloring})
     (threading == :single) && (threading = Threading{:single})
     (threading == :gpu) && (threading = Threading{:gpu})
+    (threading == :cellsplitting) && (threading = Threading{:cellsplitting})
 
     Z, store = allocatestorage(operator, test_functions, trial_functions,
         storage_policy)
