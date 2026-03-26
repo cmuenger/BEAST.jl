@@ -44,13 +44,12 @@ function launch_gpu_kernel!(gpu_kernel, args...;gpu_blocksize=(32,32),problem_si
 
 
     blocks = ceil.(Int, problem_size ./ gpu_blocksize)
+    
     println("GPU kernel: $(gpu_kernel)")
     println("Problem size: $problem_size")
     println("Blocks: $blocks, Threads per block: $gpu_blocksize")
 
-    CUDA.@sync begin
-        @cuda blocks=blocks threads=gpu_blocksize gpu_kernel(args...)
-    end
-
+    @cuda blocks=blocks threads=gpu_blocksize gpu_kernel(args...)
+    
     return
 end

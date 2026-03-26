@@ -11,6 +11,8 @@ function load_assemblydata_gpu(X)
 
     num_shapes = numfunctions(refspace(X), domain(el[1]))
     
+    l2g_map = l2g_maps!(ad,numfunctions(X))
+    
     rows = Int[]
     cols = Int[]
     vals = ComplexF64[]
@@ -29,12 +31,12 @@ function load_assemblydata_gpu(X)
             end
         end
     end
-
-    dof_ad = sparse(rows, cols, vals, numfunctions(X), num_shapes*length(el))
+  
+    dof_ad = sparse(rows, cols, vals, length(l2g_map), num_shapes*length(el))
     
     ad_sparse_d = CuSparseMatrixCSC(dof_ad)
     el_d = CuArray(el)
-    return el_d,ad_sparse_d
+    return el_d,ad_sparse_d,l2g_map
 end
 
 
@@ -390,40 +392,42 @@ function assemble!(operator::Operator, test_functions::Space, trial_functions::S
     #trial_splits = [round(Int,s) for s in range(0, stop=numfunctions(trial_functions), length=gpu_tiling[2]+1)]
     println("GPU assemble called.")
 
-    # test_geo = geometry(test_functions)
-    # trial_geo = geometry(trial_functions)
+    test_geo = geometry(test_functions)
+    trial_geo = geometry(trial_functions)
 
-    # test_splits = split(numcells(test_geo), tilingstrat[1])
-    # trial_splits = split(numcells(trial_geo), tilingstrat[2])
+    test_splits = split(numcells(test_geo), tilingstrat[1])
+    trial_splits = split(numcells(trial_geo), tilingstrat[2])
 
 
-    test_splits = split(numfunctions(test_functions), tilingstrat[1])
-    trial_splits = split(numfunctions(test_functions), tilingstrat[2])
+    # test_splits = split(numfunctions(test_functions), tilingstrat[1])
+    # trial_splits = split(numfunctions(test_functions), tilingstrat[2])
    
     println("Gpu tiling: $tilingstrat")
     @show first.(test_splits)
     @show first.(trial_splits)
 
+    test_l2g = Vector{Vector{Int}}(undef,length(test_splits))
     test_ad_qd = Vector{Tuple{Tuple{CuArray,CuSparseMatrixCSC},Tuple{CuArray,CuArray}}}(undef,length(test_splits))
     for i in eachindex(test_splits)
 
-        # test_subgeo = CompScienceMeshes.SubMesh(test_geo, test_splits[i])
-        # test_functions_p = restrict(test_functions, test_subgeo)
+        test_subgeo = CompScienceMeshes.SubMesh(test_geo, test_splits[i])
+        test_functions_p = restrict(test_functions, test_subgeo)
 
-        test_functions_p = subset(test_functions, test_splits[i])
+        # test_functions_p = subset(test_functions, test_splits[i])
 
-        test_ad_qd[i] =assemble_primer_gpu(operator, test_functions_p, quadstrat.outer_rule)
+        test_l2g[i],test_ad_qd[i] =assemble_primer_gpu(operator, test_functions_p, quadstrat.outer_rule)
     end
 
+    trial_l2g = Vector{Vector{Int}}(undef,length(trial_splits))
     trial_ad_qd = Vector{Tuple{Tuple{CuArray,CuSparseMatrixCSC},Tuple{CuArray,CuArray}}}(undef,length(trial_splits))
  
     for i in eachindex(trial_splits)
-        # trial_subgeo = CompScienceMeshes.SubMesh(trial_geo, trial_splits[i])
-        # trial_functions_p = restrict(trial_functions, trial_subgeo)
+        trial_subgeo = CompScienceMeshes.SubMesh(trial_geo, trial_splits[i])
+        trial_functions_p = restrict(trial_functions, trial_subgeo)
 
-        trial_functions_p = subset(trial_functions, trial_splits[i])
+        # trial_functions_p = subset(trial_functions, trial_splits[i])
 
-        trial_ad_qd[i] = assemble_primer_gpu(operator, trial_functions_p, quadstrat.inner_rule)
+        trial_l2g[i],trial_ad_qd[i] = assemble_primer_gpu(operator, trial_functions_p, quadstrat.inner_rule)
     end
 
     #TODO Convert all rules for CommonVertex, CommonEdge, and CommonFace.
@@ -448,7 +452,7 @@ function assemble!(operator::Operator, test_functions::Space, trial_functions::S
 
 
             qd_d = (test_qd,trial_qd,cvrule_d)
-            store1(v,m,n) =  store(v,test_splits[i][m],trial_splits[j][n]) #) BEAST._OffsetStore(store, lo_test-1, lo_trial-1)
+            store1(v,m,n) =  store(v,test_l2g[i][m],trial_l2g[j][n]) #) BEAST._OffsetStore(store, lo_test-1, lo_trial-1)
             
             assemblechunk_body_gpu!(operator,
                 refspace(test_functions),test_el_d,test_ad_d,
@@ -477,7 +481,7 @@ function assemble_primer_gpu(operator::Operator, functions::Space, quadrule)
     #@show q
     quadrule_d = CuArray(q)
 
-    el_d,ad_d = load_assemblydata_gpu(functions)
+    el_d,ad_d,l2g_map = load_assemblydata_gpu(functions)
 
     chart = CUDA.@allowscalar domain(el_d[1])
     numshapes = numfunctions(space,chart)
@@ -490,7 +494,7 @@ function assemble_primer_gpu(operator::Operator, functions::Space, quadrule)
                        gpu_blocksize=(128,4), problem_size=(length(el_d),length(quadrule_d)))
 
 
-    return (el_d, ad_d), (quadrule_d,shapes_d)
+    return l2g_map, ((el_d, ad_d), (quadrule_d,shapes_d))
 end
 
 

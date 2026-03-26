@@ -48,9 +48,8 @@ cpu_tstrat = CUDAExt.TilingStrategy(CUDAExt.WorksizeTiling(128), CUDAExt.Worksiz
 
 @time Th_cpu = assemble(T,Y,Y;threading=:cellcoloring,quadstrat=qstrat)
 
-@show numfunctions(X)
 @show Threads.nthreads()
-@show eps(real(eltype(Th_cpu))) maximum(norm.(Th_cpu2-Th_cpu)) 
+@show eps(real(eltype(Th_cpu))) maximum(norm.(Th_gpu-Th_cpu)) 
 
 
 
