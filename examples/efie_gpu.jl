@@ -8,7 +8,7 @@ using LinearAlgebra
 using CUDA
 
 
-Γ = meshcuboid(1.0,1.0,1.0,1.0)
+Γ = meshcuboid(1.0,1.0,1.0,0.05)
 
 
 #Γ = meshsphere(1.0,0.1;generator=:gmsh)
@@ -36,9 +36,12 @@ qstrat = BEAST.DoubleNumSauterQstrat(4, 4, 6, 6, 6, 6)
 
 CUDAExt = Base.get_extension(BEAST, :BEASTCUDAExt)
 
-gpu_tstrat = CUDAExt.TilingStrategy(CUDAExt.EqualTiling(1), CUDAExt.EqualTiling(1))
+#gpu_tstrat = CUDAExt.TilingStrategy(CUDAExt.EqualTiling(5), CUDAExt.EqualTiling(5))
+gpu_tstrat = CUDAExt.TilingStrategy(CUDAExt.WorksizeTiling(4096), CUDAExt.WorksizeTiling(4096))
+
 
 CUDA.@time Th_gpu = assemble(T,Y,Y;threading=:gpu,tilingstrat=gpu_tstrat,quadstrat=qstrat)
+
 
 cpu_tstrat = CUDAExt.TilingStrategy(CUDAExt.WorksizeTiling(128), CUDAExt.WorksizeTiling(128))
 
@@ -50,6 +53,4 @@ cpu_tstrat = CUDAExt.TilingStrategy(CUDAExt.WorksizeTiling(128), CUDAExt.Worksiz
 
 @show Threads.nthreads()
 @show eps(real(eltype(Th_cpu))) maximum(norm.(Th_gpu-Th_cpu)) 
-
-
 

@@ -34,7 +34,7 @@ end
 function launch_gpu_kernel!(gpu_kernel, args...;gpu_blocksize=(32,32),problem_size)
     
     if problem_size == 0
-        println("Problem size is zero, skipping GPU kernel launch.")
+        # println("Problem size is zero, skipping GPU kernel launch.")
         return 
     end 
     @assert all(gpu_blocksize .> 0)  "GPU block size must be positive integers."
@@ -45,9 +45,9 @@ function launch_gpu_kernel!(gpu_kernel, args...;gpu_blocksize=(32,32),problem_si
 
     blocks = ceil.(Int, problem_size ./ gpu_blocksize)
     
-    println("GPU kernel: $(gpu_kernel)")
-    println("Problem size: $problem_size")
-    println("Blocks: $blocks, Threads per block: $gpu_blocksize")
+    # println("GPU kernel: $(gpu_kernel)")
+    # println("Problem size: $problem_size")
+    # println("Blocks: $blocks, Threads per block: $gpu_blocksize")
 
     @cuda blocks=blocks threads=gpu_blocksize gpu_kernel(args...)
     

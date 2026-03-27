@@ -387,6 +387,8 @@ function assemble!(operator::Operator, test_functions::Space, trial_functions::S
     quadstrat=defaultquadstrat, tilingstrat=TilingStrategy(EqualTiling(1),EqualTiling(1)),kwargs...)
 
     quadstrat = quadstrat(operator, test_functions, trial_functions)
+    T = scalartype(operator,test_functions,trial_functions)
+    
 
     #test_splits = [round(Int,s) for s in range(0, stop=numfunctions(test_functions), length=gpu_tiling[1]+1)]
     #trial_splits = [round(Int,s) for s in range(0, stop=numfunctions(trial_functions), length=gpu_tiling[2]+1)]
@@ -405,29 +407,36 @@ function assemble!(operator::Operator, test_functions::Space, trial_functions::S
     println("Gpu tiling: $tilingstrat")
     @show first.(test_splits)
     @show first.(trial_splits)
+    
 
     test_l2g = Vector{Vector{Int}}(undef,length(test_splits))
     test_ad_qd = Vector{Tuple{Tuple{CuArray,CuSparseMatrixCSC},Tuple{CuArray,CuArray}}}(undef,length(test_splits))
-    for i in eachindex(test_splits)
-
-        test_subgeo = CompScienceMeshes.SubMesh(test_geo, test_splits[i])
-        test_functions_p = restrict(test_functions, test_subgeo)
-
-        # test_functions_p = subset(test_functions, test_splits[i])
-
-        test_l2g[i],test_ad_qd[i] =assemble_primer_gpu(operator, test_functions_p, quadstrat.outer_rule)
-    end
-
     trial_l2g = Vector{Vector{Int}}(undef,length(trial_splits))
     trial_ad_qd = Vector{Tuple{Tuple{CuArray,CuSparseMatrixCSC},Tuple{CuArray,CuArray}}}(undef,length(trial_splits))
- 
-    for i in eachindex(trial_splits)
-        trial_subgeo = CompScienceMeshes.SubMesh(trial_geo, trial_splits[i])
-        trial_functions_p = restrict(trial_functions, trial_subgeo)
+    
+    @sync begin
+      for i in eachindex(test_splits)
+            Threads.@spawn begin
+                test_subgeo = CompScienceMeshes.SubMesh(test_geo, test_splits[i])
+                test_functions_p = restrict(test_functions, test_subgeo)
 
-        # trial_functions_p = subset(trial_functions, trial_splits[i])
+                # test_functions_p = subset(test_functions, test_splits[i])
 
-        trial_l2g[i],trial_ad_qd[i] = assemble_primer_gpu(operator, trial_functions_p, quadstrat.inner_rule)
+                test_l2g[i],test_ad_qd[i] =assemble_primer_gpu(operator, test_functions_p, quadstrat.outer_rule)
+            end
+        end
+
+      
+        for i in eachindex(trial_splits)
+            Threads.@spawn begin
+                trial_subgeo = CompScienceMeshes.SubMesh(trial_geo, trial_splits[i])
+                trial_functions_p = restrict(trial_functions, trial_subgeo)
+
+                # trial_functions_p = subset(trial_functions, trial_splits[i])
+
+                trial_l2g[i],trial_ad_qd[i] = assemble_primer_gpu(operator, trial_functions_p, quadstrat.inner_rule)
+            end
+        end
     end
 
     #TODO Convert all rules for CommonVertex, CommonEdge, and CommonFace.
@@ -440,27 +449,66 @@ function assemble!(operator::Operator, test_functions::Space, trial_functions::S
     # @show q
     cvrule_d = CuArray(q)
 
-    for i in eachindex(test_splits)
+    NUM_CUDA_STREAMS = 10 
+    N = length(test_splits)
+    M = length(trial_splits)
 
-        (test_el_d, test_ad_d),test_qd = test_ad_qd[i]
-        #test_functions_p = subset(test_functions, test_splits[i])
+    Zbuffer = Channel{Tuple{Matrix{T},Vector{Int},Vector{Int}}}(2*NUM_CUDA_STREAMS)
+    
+    for l in 1:NUM_CUDA_STREAMS
+        errormonitor(Threads.@spawn begin
+            for m in 1:NUM_CUDA_STREAMS:N*M
 
-        for j in eachindex(trial_splits)
+                blk = m+(l-1)
+                if blk > N*M
+                    continue
+                end
+                i = mod1(blk,N)
+                j = div(blk-1,N)+1
+    
+                (test_el_d, test_ad_d),test_qd = test_ad_qd[i]
 
-            #trial_functions_p = subset(trial_functions, trial_splits[j])
-            (trial_el_d, trial_ad_d),trial_qd = trial_ad_qd[j]
+                (trial_el_d, trial_ad_d),trial_qd = trial_ad_qd[j]
 
-
-            qd_d = (test_qd,trial_qd,cvrule_d)
-            store1(v,m,n) =  store(v,test_l2g[i][m],trial_l2g[j][n]) #) BEAST._OffsetStore(store, lo_test-1, lo_trial-1)
+                qd_d = (test_qd,trial_qd,cvrule_d)
+                #store1(v,m,n) =  store(v,test_l2g[i][m],trial_l2g[j][n]) #) BEAST._OffsetStore(store, lo_test-1, lo_trial-1)
+                
+                matrix =assemblechunk_body_gpu!(operator,
+                                                refspace(test_functions),test_el_d,test_ad_d,
+                                                refspace(trial_functions),trial_el_d,trial_ad_d,
+                                                qd_d)
+                put!(Zbuffer,(matrix,test_l2g[i],trial_l2g[j]) )
             
-            assemblechunk_body_gpu!(operator,
-                refspace(test_functions),test_el_d,test_ad_d,
-                refspace(trial_functions),trial_el_d,trial_ad_d,
-                qd_d,store1)
+            end
+        end )
+            # println(matrix[end,end])
+            # println("Store called")
+            # for j in axes(matrix,2)
+            #     for i in axes(matrix,1)
+            #         store1(matrix[i,j],i,j)   
+            #     end
+            # end
             #assemblechunk_gpu!(operator, test_functions_p, trial_functions_p, store1, quadstrat=quadstrat)
-        end
     end
+
+    k = N*M
+    pbar = BEAST.progressbar(k, true)
+    maxk = k
+    while k>0
+    
+        (Z,test_l2g_map,trial_l2g_map) = take!(Zbuffer)
+        #@show k
+        store1(v,m,n) =  store(v,test_l2g_map[m],trial_l2g_map[n]) 
+        for j in axes(Z,2)
+            for i in axes(Z,1)
+                store1(Z[i,j],i,j)   
+            end
+        end
+        k -= 1
+
+        update!(pbar, maxk-k)
+    end
+    finish!(pbar)
    
     #TODO: tiling of operator assembly to fit GPU memory constraints.
 
@@ -502,7 +550,7 @@ end
 function assemblechunk_body_gpu!(operator::IntegralOperator,
     test_space,test_el_d::CuArray, test_ad_d::CuSparseMatrixCSC,
     trial_space,trial_el_d::CuArray, trial_ad_d::CuSparseMatrixCSC, 
-    qd_d,store)
+    qd_d)
 
 
     (quadrule_d,test_shapes_d),(quadrule_d,trial_shapes_d),cvrule_d = qd_d
@@ -520,7 +568,7 @@ function assemblechunk_body_gpu!(operator::IntegralOperator,
     #println("Singularity detection")
     singularitydetection!(quadstrat_d,numpairs,test_el_d,trial_el_d)
 
-    @show numpairs
+    #@show numpairs
     
     zlocal_d = CUDA.fill(zero(ComplexF64),numshapes_test*length(test_el_d),length(trial_el_d)*numshapes_trial)
   
@@ -557,15 +605,7 @@ function assemblechunk_body_gpu!(operator::IntegralOperator,
     #launch_gpu_kernel!(gpu_build_matrix!,matrix_d, zlocal_d, test_ad_d, trial_ad_d, numshapes_test, numshapes_trial;
     #                   gpu_blocksize=(512,1), problem_size=(numfunctions(test_functions), numfunctions(trial_functions)))
   
-    matrix = Array(matrix_d)
-    
-    # println(matrix[end,end])
-    # println("Store called")
-    for j in 1:size(matrix,2)
-        for i in 1:size(matrix,1)
-            store(matrix[i,j],i,j)   
-        end
-    end
+    return Array(matrix_d)
 end
 
 function assemblechunk_gpu!(operator::IntegralOperator, test_functions::Space, trial_functions::Space,store;
