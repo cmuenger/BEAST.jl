@@ -69,7 +69,8 @@ function assemble_primer(operator::Operator, functions::Space, quadrule,tiling::
     chart_t = typeof(chart(geo, first(geo)))
     assemblydata_t = Tuple{Space, Tuple{Vector{chart_t}, BEAST.AssemblyData{Float64}, Vector{Int}, Vector{Int}}}
     shape_t = shapetype(refspace(functions))
-    quaddata_t = Matrix{Vector{@NamedTuple{weight::Float64, point::CompScienceMeshes.MeshPointNM{Float64, chart_t, 2, 3}, value::SVector{3, shape_t}}}}
+    nf = numfunctions(refspace(functions), domain(chart(geo, first(geo))))
+    quaddata_t = Matrix{Vector{@NamedTuple{weight::Float64, point::CompScienceMeshes.MeshPointNM{Float64, chart_t, 2, 3}, value::SVector{nf, shape_t}}}}
    
 
     k=0

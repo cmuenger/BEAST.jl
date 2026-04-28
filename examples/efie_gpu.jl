@@ -8,15 +8,18 @@ using LinearAlgebra
 using CUDA
 
 
-Γ = meshcuboid(1.0,1.0,1.0,0.05)
-
-
-#Γ = meshsphere(1.0,0.1;generator=:gmsh)
+Γ = meshcuboid(1.0,1.0,1.0,1.0)
+Γ = meshsphere(1.0,0.5;generator=:gmsh)
 
 
 X = raviartthomas(Γ)
 Y = buffachristiansen(Γ)
-Z = lagrangec0d1(Γ)
+Z = lagrangec0d2(Γ)
+W = lagrangecxd0(Γ)
+L = lagrangec0(Γ,order=2)
+G = BEAST.gwpdiv(Γ; order=3)
+
+
 
 @show numcells(Γ)
 @show numcells(geometry(Y))
@@ -24,6 +27,7 @@ Z = lagrangec0d1(Γ)
 @show numfunctions(X)
 @show numfunctions(Y)
 @show numfunctions(Z)
+@show numfunctions(G)
 
 κ, η = 1.0, 1.0
 T = Maxwell3D.singlelayer(wavenumber=κ)
@@ -40,16 +44,18 @@ CUDAExt = Base.get_extension(BEAST, :BEASTCUDAExt)
 gpu_tstrat = CUDAExt.TilingStrategy(CUDAExt.WorksizeTiling(4096), CUDAExt.WorksizeTiling(4096))
 
 
-CUDA.@time Th_gpu = assemble(T,Y,Y;threading=:gpu,tilingstrat=gpu_tstrat,quadstrat=qstrat)
+CUDA.@time Th_gpu = assemble(V,L,L;threading=:gpu,tilingstrat=gpu_tstrat,quadstrat=qstrat)
 
 
 cpu_tstrat = CUDAExt.TilingStrategy(CUDAExt.WorksizeTiling(128), CUDAExt.WorksizeTiling(128))
 
-@time Th_cpu2 = assemble(T,Y,Y;threading=:cellsplitting,tilingstrat=cpu_tstrat,quadstrat=qstrat)
+@time Th_cpu2 = assemble(V,L,L;threading=:cellsplitting,tilingstrat=cpu_tstrat,quadstrat=qstrat)
 
-@time Th_cpu3 = assemble(T,Y,Y;threading=:dofsplitting,quadstrat=qstrat)
+@time Th_cpu3 = assemble(V,L,L;threading=:dofsplitting,quadstrat=qstrat)
 
-@time Th_cpu = assemble(T,Y,Y;threading=:cellcoloring,quadstrat=qstrat)
+@time Th_cpu = assemble(V,L,L;threading=:cellcoloring,quadstrat=qstrat)
+
+@time Th_cpu = assemble(V,Z,Z;threading=:cellcoloring,quadstrat=qstrat)
 
 @show Threads.nthreads()
 @show eps(real(eltype(Th_cpu))) maximum(norm.(Th_gpu-Th_cpu)) 

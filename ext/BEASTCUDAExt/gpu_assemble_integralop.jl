@@ -439,16 +439,29 @@ function assemble!(operator::Operator, test_functions::Space, trial_functions::S
         end
     end
 
-    #TODO Convert all rules for CommonVertex, CommonEdge, and CommonFace.
     cv_rule = CompScienceMeshes.legendre(quadstrat.sauter_schwab_common_vert, 0.0, 1.0)
-    # @show cv_rule
     q = Array{Tuple{Float64,Float64}}(undef,length(cv_rule[2]))
     for (i,a) in enumerate(zip(cv_rule[1], cv_rule[2]))
         q[i]=a
     end
-    # @show q
     cvrule_d = CuArray(q)
 
+    ce_rule = CompScienceMeshes.legendre(quadstrat.sauter_schwab_common_edge, 0.0, 1.0)
+    q = Array{Tuple{Float64,Float64}}(undef,length(ce_rule[2]))
+    for (i,a) in enumerate(zip(ce_rule[1], ce_rule[2]))
+        q[i]=a
+    end
+    cerule_d = CuArray(q)
+
+    cf_rule = CompScienceMeshes.legendre(quadstrat.sauter_schwab_common_face, 0.0, 1.0)
+    q = Array{Tuple{Float64,Float64}}(undef,length(cv_rule[2]))
+    for (i,a) in enumerate(zip(cf_rule[1], cf_rule[2]))
+        q[i]=a
+    end
+    cfrule_d = CuArray(q)
+
+
+    #TODO: Number of CUDA streams as parameter
     NUM_CUDA_STREAMS = 10 
     N = length(test_splits)
     M = length(trial_splits)
@@ -470,7 +483,7 @@ function assemble!(operator::Operator, test_functions::Space, trial_functions::S
 
                 (trial_el_d, trial_ad_d),trial_qd = trial_ad_qd[j]
 
-                qd_d = (test_qd,trial_qd,cvrule_d)
+                qd_d = (test_qd,trial_qd,cvrule_d,cerule_d,cfrule_d)
                 #store1(v,m,n) =  store(v,test_l2g[i][m],trial_l2g[j][n]) #) BEAST._OffsetStore(store, lo_test-1, lo_trial-1)
                 
                 matrix =assemblechunk_body_gpu!(operator,
@@ -519,6 +532,7 @@ end
 function assemble_primer_gpu(operator::Operator, functions::Space, quadrule)
 
     space = refspace(functions)
+    @show space
 
     qrule = CompScienceMeshes.trgauss(quadrule) 
     # @show qrule
@@ -539,7 +553,7 @@ function assemble_primer_gpu(operator::Operator, functions::Space, quadrule)
     shapes_d = CuArray{SVector{numshapes,shapefunction_type}}(undef, length(el_d), length(quadrule_d))
 
     launch_gpu_kernel!(gpu_shapefunction_eval!, shapes_d, el_d, space, quadrule_d;
-                       gpu_blocksize=(128,4), problem_size=(length(el_d),length(quadrule_d)))
+                       gpu_blocksize=(64,4), problem_size=(length(el_d),length(quadrule_d)))
 
 
     return l2g_map, ((el_d, ad_d), (quadrule_d,shapes_d))
@@ -553,7 +567,7 @@ function assemblechunk_body_gpu!(operator::IntegralOperator,
     qd_d)
 
 
-    (quadrule_d,test_shapes_d),(quadrule_d,trial_shapes_d),cvrule_d = qd_d
+    (quadrule_d,test_shapes_d),(quadrule_d,trial_shapes_d),cvrule_d,cerule_d,cfrule_d = qd_d
 
 
     test_domain = CUDA.@allowscalar domain(test_el_d[1])
@@ -584,13 +598,13 @@ function assemblechunk_body_gpu!(operator::IntegralOperator,
                         gpu_blocksize=(256), problem_size=(numpairs[2]))
 
     #println("Common edge integrals")
-    strategy = CommonEdge(cvrule_d)
+    strategy = CommonEdge(cerule_d)
     launch_gpu_kernel!(gpu_momintegral_sauterschwab!,zlocal_d,operator,numpairs[3],quadstrat_d[:,3],test_el_d,trial_el_d,
                         test_space,trial_space,strategy;
                         gpu_blocksize=(256), problem_size=(numpairs[3]))
 
     #println("Common face integrals")
-    strategy = CommonFace(cvrule_d)
+    strategy = CommonFace(cfrule_d)
     launch_gpu_kernel!(gpu_momintegral_sauterschwab!,zlocal_d,operator,numpairs[4],quadstrat_d[:,4],test_el_d,trial_el_d,
                         test_space,trial_space,strategy;
                         gpu_blocksize=(256), problem_size=(numpairs[4]))
@@ -608,119 +622,119 @@ function assemblechunk_body_gpu!(operator::IntegralOperator,
     return Array(matrix_d)
 end
 
-function assemblechunk_gpu!(operator::IntegralOperator, test_functions::Space, trial_functions::Space,store;
-    quadstrat=BEAST.defaultquadstrat,gpu_blocksize=(0,0))
+# function assemblechunk_gpu!(operator::IntegralOperator, test_functions::Space, trial_functions::Space,store;
+#     quadstrat=BEAST.defaultquadstrat,gpu_blocksize=(0,0))
 
-    println("GPU assemble called.")
-    test_space = refspace(test_functions)
-    trial_space = refspace(trial_functions)
+#     println("GPU assemble called.")
+#     test_space = refspace(test_functions)
+#     trial_space = refspace(trial_functions)
 
    
 
-    qrule = CompScienceMeshes.trgauss(quadstrat(operator,test_space,trial_space).outer_rule)
-    # @show qrule
-    q = Array{Tuple{SVector{2,Float64},Float64}}(undef,length(qrule[2]))
-    for (i,a) in enumerate(zip(eachcol(qrule[1]), qrule[2]))
-        q[i]=a
-    end
-    #@show q
-    quadrule_d = CuArray(q)
+#     qrule = CompScienceMeshes.trgauss(quadstrat(operator,test_space,trial_space).outer_rule)
+#     # @show qrule
+#     q = Array{Tuple{SVector{2,Float64},Float64}}(undef,length(qrule[2]))
+#     for (i,a) in enumerate(zip(eachcol(qrule[1]), qrule[2]))
+#         q[i]=a
+#     end
+#     #@show q
+#     quadrule_d = CuArray(q)
 
 
-    cv_rule = CompScienceMeshes.legendre(quadstrat(operator,test_space,trial_space).sauter_schwab_common_vert, 0.0, 1.0)
-    # @show cv_rule
-    q = Array{Tuple{Float64,Float64}}(undef,length(cv_rule[2]))
-    for (i,a) in enumerate(zip(cv_rule[1], cv_rule[2]))
-        q[i]=a
-    end
-    # @show q
-    cvrule_d = CuArray(q)
+#     cv_rule = CompScienceMeshes.legendre(quadstrat(operator,test_space,trial_space).sauter_schwab_common_vert, 0.0, 1.0)
+#     # @show cv_rule
+#     q = Array{Tuple{Float64,Float64}}(undef,length(cv_rule[2]))
+#     for (i,a) in enumerate(zip(cv_rule[1], cv_rule[2]))
+#         q[i]=a
+#     end
+#     # @show q
+#     cvrule_d = CuArray(q)
 
-    test_el_d,test_ad_d = load_assemblydata_gpu(test_functions)
-    trial_el_d,trial_ad_d = load_assemblydata_gpu(trial_functions)
+#     test_el_d,test_ad_d = load_assemblydata_gpu(test_functions)
+#     trial_el_d,trial_ad_d = load_assemblydata_gpu(trial_functions)
 
-    test_domain = CUDA.@allowscalar domain(test_el_d[1])
-    trial_domain = CUDA.@allowscalar domain(trial_el_d[1])
+#     test_domain = CUDA.@allowscalar domain(test_el_d[1])
+#     trial_domain = CUDA.@allowscalar domain(trial_el_d[1])
 
-    numshapes_test = numfunctions(test_space,test_domain)
-    numshapes_trial = numfunctions(trial_space,trial_domain)
+#     numshapes_test = numfunctions(test_space,test_domain)
+#     numshapes_trial = numfunctions(trial_space,trial_domain)
 
-    #@show eltype(test_el_d)
-    shapefunction_type = shapetype(test_space)
-    test_shapes_d = CuArray{SVector{numshapes_test,shapefunction_type}}(undef, length(test_el_d), length(quadrule_d))
-    shapefunction_type = shapetype(trial_space)
-    trial_shapes_d = CuArray{SVector{numshapes_trial,shapefunction_type}}(undef, length(trial_el_d), length(quadrule_d))
+#     #@show eltype(test_el_d)
+#     shapefunction_type = shapetype(test_space)
+#     test_shapes_d = CuArray{SVector{numshapes_test,shapefunction_type}}(undef, length(test_el_d), length(quadrule_d))
+#     shapefunction_type = shapetype(trial_space)
+#     trial_shapes_d = CuArray{SVector{numshapes_trial,shapefunction_type}}(undef, length(trial_el_d), length(quadrule_d))
   
-    #meshpoint_type = CompScienceMeshes.MeshPointNM{Float64,eltype(test_el_d),2,3}
-    #test_shapes_d = CuArray{Tuple{SVector{numfunctions(test_space,test_domain),shapefunction_type},meshpoint_type,Float64}}(undef, length(test_el_d), length(quadrule_d))
-    #test_shapes_d = CUDA.fill((value=zeros(SVector{3,Float64}),divergence=0.0), length(test_el_d), length(quadrule_d))
-    #trial_shapes_d = CuArray{Tuple{SVector{numfunctions(trial_space,trial_domain),shapefunction_type},meshpoint_type,Float64}}(undef, length(trial_el_d), length(quadrule_d))
-    #trial_shapes_d = CUDA.fill((value=zeros(SVector{3,Float64}),divergence=0.0),  length(trial_el_d), length(quadrule_d))
-    # @show CUDA.@allowscalar test_shapes_d[1,1][1]
-    #  @show CUDA.@allowscalar test_shapes_d[1,1][2]
-    #   @show CUDA.@allowscalar test_shapes_d[1,1][3]
+#     #meshpoint_type = CompScienceMeshes.MeshPointNM{Float64,eltype(test_el_d),2,3}
+#     #test_shapes_d = CuArray{Tuple{SVector{numfunctions(test_space,test_domain),shapefunction_type},meshpoint_type,Float64}}(undef, length(test_el_d), length(quadrule_d))
+#     #test_shapes_d = CUDA.fill((value=zeros(SVector{3,Float64}),divergence=0.0), length(test_el_d), length(quadrule_d))
+#     #trial_shapes_d = CuArray{Tuple{SVector{numfunctions(trial_space,trial_domain),shapefunction_type},meshpoint_type,Float64}}(undef, length(trial_el_d), length(quadrule_d))
+#     #trial_shapes_d = CUDA.fill((value=zeros(SVector{3,Float64}),divergence=0.0),  length(trial_el_d), length(quadrule_d))
+#     # @show CUDA.@allowscalar test_shapes_d[1,1][1]
+#     #  @show CUDA.@allowscalar test_shapes_d[1,1][2]
+#     #   @show CUDA.@allowscalar test_shapes_d[1,1][3]
     
-    launch_gpu_kernel!(gpu_shapefunction_eval!, test_shapes_d, test_el_d, test_space, quadrule_d;
-                       gpu_blocksize=(128,4), problem_size=(length(test_el_d),length(quadrule_d)))
-    launch_gpu_kernel!(gpu_shapefunction_eval!, trial_shapes_d, trial_el_d, trial_space, quadrule_d;
-                      gpu_blocksize=(128,4), problem_size=(length(trial_el_d),length(quadrule_d)))
+#     launch_gpu_kernel!(gpu_shapefunction_eval!, test_shapes_d, test_el_d, test_space, quadrule_d;
+#                        gpu_blocksize=(128,4), problem_size=(length(test_el_d),length(quadrule_d)))
+#     launch_gpu_kernel!(gpu_shapefunction_eval!, trial_shapes_d, trial_el_d, trial_space, quadrule_d;
+#                       gpu_blocksize=(128,4), problem_size=(length(trial_el_d),length(quadrule_d)))
     
-    #@show CUDA.@allowscalar test_shapes_d[1,:]
-    #@show CUDA.@allowscalar trial_shapes_d[1,:]
-    #@show size(trial_el_d)
+#     #@show CUDA.@allowscalar test_shapes_d[1,:]
+#     #@show CUDA.@allowscalar trial_shapes_d[1,:]
+#     #@show size(trial_el_d)
 
-    quadstrat_d = CUDA.fill(0,length(test_el_d)*length(trial_el_d), 4)
-    numpairs = zeros(Int,4)
-    #println("Singularity detection")
-    singularitydetection!(quadstrat_d,numpairs,test_el_d,trial_el_d)
+#     quadstrat_d = CUDA.fill(0,length(test_el_d)*length(trial_el_d), 4)
+#     numpairs = zeros(Int,4)
+#     #println("Singularity detection")
+#     singularitydetection!(quadstrat_d,numpairs,test_el_d,trial_el_d)
 
-    @show numpairs
+#     @show numpairs
     
-    zlocal_d = CUDA.fill(zero(ComplexF64),numshapes_test*length(test_el_d),length(trial_el_d)*numshapes_trial)
+#     zlocal_d = CUDA.fill(zero(ComplexF64),numshapes_test*length(test_el_d),length(trial_el_d)*numshapes_trial)
   
-    #println("Double num integrals")
-    launch_gpu_kernel!(gpu_momintegral_doublenum!,zlocal_d,operator,numpairs[1],quadstrat_d[:,1],
-                   test_el_d,trial_el_d,test_shapes_d,trial_shapes_d,test_space,trial_space,quadrule_d;
-                   gpu_blocksize=(256), problem_size=(numpairs[1]))
+#     #println("Double num integrals")
+#     launch_gpu_kernel!(gpu_momintegral_doublenum!,zlocal_d,operator,numpairs[1],quadstrat_d[:,1],
+#                    test_el_d,trial_el_d,test_shapes_d,trial_shapes_d,test_space,trial_space,quadrule_d;
+#                    gpu_blocksize=(256), problem_size=(numpairs[1]))
 
-    #println("Common vertex integrals")
-    strategy = CommonVertex(cvrule_d)
-    launch_gpu_kernel!(gpu_momintegral_sauterschwab!,zlocal_d,operator,numpairs[2],quadstrat_d[:,2],test_el_d,trial_el_d,
-                        test_space,trial_space,strategy;
-                        gpu_blocksize=(256), problem_size=(numpairs[2]))
+#     #println("Common vertex integrals")
+#     strategy = CommonVertex(cvrule_d)
+#     launch_gpu_kernel!(gpu_momintegral_sauterschwab!,zlocal_d,operator,numpairs[2],quadstrat_d[:,2],test_el_d,trial_el_d,
+#                         test_space,trial_space,strategy;
+#                         gpu_blocksize=(256), problem_size=(numpairs[2]))
 
-    #println("Common edge integrals")
-    strategy = CommonEdge(cvrule_d)
-    launch_gpu_kernel!(gpu_momintegral_sauterschwab!,zlocal_d,operator,numpairs[3],quadstrat_d[:,3],test_el_d,trial_el_d,
-                        test_space,trial_space,strategy;
-                        gpu_blocksize=(256), problem_size=(numpairs[3]))
+#     #println("Common edge integrals")
+#     strategy = CommonEdge(cvrule_d)
+#     launch_gpu_kernel!(gpu_momintegral_sauterschwab!,zlocal_d,operator,numpairs[3],quadstrat_d[:,3],test_el_d,trial_el_d,
+#                         test_space,trial_space,strategy;
+#                         gpu_blocksize=(256), problem_size=(numpairs[3]))
 
-    #println("Common face integrals")
-    strategy = CommonFace(cvrule_d)
-    launch_gpu_kernel!(gpu_momintegral_sauterschwab!,zlocal_d,operator,numpairs[4],quadstrat_d[:,4],test_el_d,trial_el_d,
-                        test_space,trial_space,strategy;
-                        gpu_blocksize=(256), problem_size=(numpairs[4]))
+#     #println("Common face integrals")
+#     strategy = CommonFace(cvrule_d)
+#     launch_gpu_kernel!(gpu_momintegral_sauterschwab!,zlocal_d,operator,numpairs[4],quadstrat_d[:,4],test_el_d,trial_el_d,
+#                         test_space,trial_space,strategy;
+#                         gpu_blocksize=(256), problem_size=(numpairs[4]))
 
-    #@show CUDA.@allowscalar zlocal_d[end]
+#     #@show CUDA.@allowscalar zlocal_d[end]
     
-    matrix_d = CUDA.fill(0.0 + 0.0im, numfunctions(test_functions), numfunctions(trial_functions))
-    # println("Building global matrix")
+#     matrix_d = CUDA.fill(0.0 + 0.0im, numfunctions(test_functions), numfunctions(trial_functions))
+#     # println("Building global matrix")
 
 
-    build_matrix!(matrix_d, zlocal_d, test_ad_d, trial_ad_d)
-    #launch_gpu_kernel!(gpu_build_matrix!,matrix_d, zlocal_d, test_ad_d, trial_ad_d, numshapes_test, numshapes_trial;
-    #                   gpu_blocksize=(512,1), problem_size=(numfunctions(test_functions), numfunctions(trial_functions)))
+#     build_matrix!(matrix_d, zlocal_d, test_ad_d, trial_ad_d)
+#     #launch_gpu_kernel!(gpu_build_matrix!,matrix_d, zlocal_d, test_ad_d, trial_ad_d, numshapes_test, numshapes_trial;
+#     #                   gpu_blocksize=(512,1), problem_size=(numfunctions(test_functions), numfunctions(trial_functions)))
   
-    matrix = Array(matrix_d)
+#     matrix = Array(matrix_d)
     
-    # println(matrix[end,end])
-    # println("Store called")
-    for j in 1:size(matrix,2)
-        for i in 1:size(matrix,1)
-            store(matrix[i,j],i,j)   
-        end
-    end
-end
+#     # println(matrix[end,end])
+#     # println("Store called")
+#     for j in 1:size(matrix,2)
+#         for i in 1:size(matrix,1)
+#             store(matrix[i,j],i,j)   
+#         end
+#     end
+# end
 
 
 
